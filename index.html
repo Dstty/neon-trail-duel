@@ -373,9 +373,10 @@
                     if(m.roundWinner && m.scores[m.roundWinner-1]>=5){ text='🏆 玩家'+m.roundWinner+' 获胜！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]; }
                     else if(m.roundWinner){ text='玩家'+m.roundWinner+' 得分！'; sub=m.scores[0]+' : '+m.scores[1]; }
                     else { text='双方同归于尽！'; sub=m.scores[0]+' : '+m.scores[1]; }
-                } else if(m.phase==='gameOver'){ text='🏆 玩家'+m.winner+' 是最终赢家！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]+(myReady?(oppReady?' · 已就绪':' · 已就绪，等待对方…'):' · 点『再来一局』或按空格'); }
+                } else if(m.phase==='gameOver'){ text='🏆 玩家'+m.winner+' 是最终赢家！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]+' · '+(myReady?'我已就绪':'点『再来一局』或按空格')+(oppReady?' · 对方已就绪':' · 等待对方就绪…'); }
                 overlay.style.display = show ? 'flex' : 'none';
                 if(show){ overlayText.textContent=text; overlaySubText.textContent=sub; }
+                updateReadyUI(); // 每次状态更新都按当前阶段刷新"再来一局"按钮的显隐与文案
             }
 
             // ---------- 渲染循环 ----------
@@ -540,7 +541,7 @@
                 const btn=$('readyBtn'); if(!btn) return;
                 if(!S || S.phase!=='gameOver'){ btn.style.display='none'; return; }
                 btn.style.display='inline-block'; btn.disabled=myReady;
-                btn.textContent = myReady ? (oppReady?'已就绪':'已就绪…') : '再来一局';
+                btn.textContent = myReady ? (oppReady?'✓ 已就绪':'已就绪…') : (oppReady?'再来一局（对方已就绪）':'再来一局');
             }
 
             function genCode(){ return String(Math.floor(1000+Math.random()*9000)); } // 4位数字房间号
