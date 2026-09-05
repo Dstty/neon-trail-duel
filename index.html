@@ -133,6 +133,16 @@
         .menu-status { font-size: 14px; color: #ccc; margin-top: 14px; min-height: 20px; }
         .menu-note { font-size: 12px; color: #777; margin-top: 16px; line-height: 1.6; }
         .copy-btn { margin-top: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25); color: #fff; border-radius: 10px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+        .help-btn { position: fixed; top: 14px; right: 14px; z-index: 60; background: rgba(15,15,28,0.9); border: 1px solid var(--border-glow); color: #eee; border-radius: 12px; padding: 8px 12px; font-size: 13px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+        .help-btn:hover { color: var(--gold); border-color: var(--gold); }
+        .help-modal { position: fixed; top:0;left:0;right:0;bottom:0; z-index: 80; display:none; align-items:center; justify-content:center; background: rgba(5,5,12,0.7); backdrop-filter: blur(6px); }
+        .help-card { width: min(92vw, 480px); max-height: 86vh; overflow:auto; background: var(--panel-bg); border: 1px solid var(--border-glow); border-radius: 18px; padding: 22px 22px 18px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+        .help-card h2 { font-size: 20px; color: var(--gold); margin-bottom: 12px; letter-spacing: 1px; }
+        .help-card h3 { font-size: 14px; color: #fff; margin: 12px 0 6px; }
+        .help-card p, .help-card li { font-size: 13px; color: #ccc; line-height: 1.7; }
+        .help-card ul { padding-left: 18px; }
+        .help-card b { color: #fff; }
+        .help-close { margin-top: 14px; width: 100%; padding: 10px; border: none; border-radius: 12px; background: linear-gradient(90deg,#0090cc,#00d4ff); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -205,6 +215,38 @@
             </div>
             <div class="menu-status" id="menuStatus">当前未连接</div>
             <div class="menu-note" id="menuNote">双方打开同一个网址 → 一人创建房间、另一人用房间号加入。</div>
+        </div>
+    </div>
+
+    <button class="help-btn" id="helpBtn">❓ 帮助</button>
+    <div class="help-modal" id="helpModal">
+        <div class="help-card">
+            <h2>⚡ 玩法说明</h2>
+            <h3>操作（两套任选，双方通用）</h3>
+            <ul>
+                <li>移动：<b>W A S D</b> 或 <b>↑ ← ↓ →</b></li>
+                <li>冲刺：<b>Shift</b> 或 <b>Enter</b>（手机用触屏方向键 + ⚡按钮）</li>
+                <li>不能 180° 掉头、不能斜向移动</li>
+            </ul>
+            <h3>如何得分</h3>
+            <ul>
+                <li>先得 <b>5 分</b> 的一方获胜。</li>
+                <li>撞到 <b>对方光迹</b> / <b>自己的旧光迹（超过0.18秒）</b> / <b>墙壁</b> → 本局输，对方得 1 分。</li>
+                <li>双方 <b>同一帧互撞</b> → 同归于尽，各得 1 分。</li>
+            </ul>
+            <h3>道具</h3>
+            <ul>
+                <li>⚡ <b>加速</b>：速度 ×1.6，持续 3.5 秒</li>
+                <li>🛡️ <b>护盾</b>：5 秒内完全免疫（碰墙、光迹都不死）</li>
+                <li>💎 <b>得分</b>：立即 +1，抢先到 5 分直接获胜</li>
+            </ul>
+            <h3>冲刺能量</h3>
+            <ul>
+                <li>冲刺消耗能量，不冲刺自动恢复；能量耗尽无法冲刺。</li>
+                <li>能量条变暗表示接近耗尽。</li>
+            </ul>
+            <p style="margin-top:10px;color:#888;font-size:12px">小提示：开局两人在不同横线；光迹越铺越乱，后段更危险，注意走位与回蓝。</p>
+            <button class="help-close" id="helpClose">知道了，关闭</button>
         </div>
     </div>
 
@@ -320,7 +362,7 @@
 
                 let text='', sub='', show=true;
                 if(m.phase==='menu'){ text='⚡ 等待对手 ⚡'; sub='';
-                } else if(m.phase==='countdown'){ text='准备...'; sub='';
+                } else if(m.phase==='countdown'){ const sec=Math.ceil(m.countdown); text=sec>0?String(sec):'GO!'; sub='准备...';
                 } else if(m.phase==='playing'){ show=false;
                 } else if(m.phase==='roundEnd'){
                     if(m.roundWinner && m.scores[m.roundWinner-1]>=5){ text='🏆 玩家'+m.roundWinner+' 获胜！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]; }
@@ -339,13 +381,15 @@
                 for(let y=0;y<H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
                 ctx.strokeStyle='rgba(100,100,200,0.3)'; ctx.lineWidth=2; ctx.strokeRect(1,1,W-2,H-2);
             }
+            let trailImg=null;
             function drawTrails(){
                 if(activeCells.size===0) return;
-                const img=ctx.createImageData(W,H),data=img.data; const now=S?S.time:0;
+                if(!trailImg) trailImg=ctx.createImageData(W,H);
+                const data=trailImg.data; const now=S?S.time:0;
                 for(const i of activeCells){ const o=grid[i]; if(o===0)continue; const fa=Math.max(0.5,1-(now-trailTime[i])*0.10); const di=i*4;
                     if(o===1){ data[di]=0; data[di+1]=Math.floor(200*fa); data[di+2]=Math.floor(255*fa); data[di+3]=Math.floor(220*fa); }
                     else { data[di]=Math.floor(255*fa); data[di+1]=Math.floor(60*fa); data[di+2]=Math.floor(110*fa); data[di+3]=Math.floor(220*fa); } }
-                ctx.putImageData(img,0,0);
+                ctx.putImageData(trailImg,0,0);
             }
             function drawItems(){ if(!S)return; S.items.forEach(it=>{ const pl=Math.sin(S.time*3+it.x)*3, r=14+pl; const c=it.type==='speed'?'#ffd700':it.type==='shield'?'#44ff88':'#cc88ff'; const g=ctx.createRadialGradient(it.x,it.y,0,it.x,it.y,r*2.5); g.addColorStop(0,c+'aa');g.addColorStop(0.4,c+'44');g.addColorStop(1,c+'00'); ctx.fillStyle=g;ctx.beginPath();ctx.arc(it.x,it.y,r*2.5,0,Math.PI*2);ctx.fill(); ctx.fillStyle=c+'dd';ctx.beginPath();ctx.arc(it.x,it.y,r,0,Math.PI*2);ctx.fill(); ctx.strokeStyle='#ffffffcc';ctx.lineWidth=2;ctx.stroke(); const em=it.type==='speed'?'⚡':it.type==='shield'?'🛡️':'💎'; ctx.font=Math.floor(r*1.2)+'px "Segoe UI Emoji",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(em,it.x,it.y+1); }); }
             function drawPlayer(idx){
@@ -356,7 +400,7 @@
                 ghost[idx].forEach(g=>{ ctx.globalAlpha=g.t/0.3*0.4; ctx.fillStyle=color; ctx.beginPath();ctx.arc(g.x,g.y,PLAYER_RADIUS*0.7,0,Math.PI*2);ctx.fill(); });
                 ctx.globalAlpha=1;
                 if(!p.alive)return;
-                disp[idx].x+=(p.x-disp[idx].x)*0.4; disp[idx].y+=(p.y-disp[idx].y)*0.4;
+                disp[idx].x+=(p.x-disp[idx].x)*0.55; disp[idx].y+=(p.y-disp[idx].y)*0.55;
                 const px=disp[idx].x,py=disp[idx].y;
                 if(p.shield){ const sp=Math.sin(S.time*5)*3; const g=ctx.createRadialGradient(px,py,0,px,py,PLAYER_RADIUS+12+sp); g.addColorStop(0,'rgba(100,255,150,0.3)');g.addColorStop(0.5,'rgba(100,255,150,0.15)');g.addColorStop(1,'rgba(100,255,150,0)'); ctx.fillStyle=g;ctx.beginPath();ctx.arc(px,py,PLAYER_RADIUS+12+sp,0,Math.PI*2);ctx.fill(); ctx.strokeStyle='rgba(100,255,150,0.6)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px,py,PLAYER_RADIUS+8+sp,0,Math.PI*2);ctx.stroke(); }
                 if(p.speed){ ctx.strokeStyle='#ffd700';ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(px,py,PLAYER_RADIUS+6,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]); }
@@ -369,12 +413,16 @@
             function drawCountdown(){ if(!S||S.phase!=='countdown')return; const sec=Math.ceil(S.countdown); ctx.fillStyle='rgba(255,255,255,0.8)';ctx.font='bold 72px "Segoe UI",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.shadowColor='#ffd700';ctx.shadowBlur=30;ctx.fillText(sec>0?sec:'GO!',W/2,H/2);ctx.shadowBlur=0; }
             function drawHUD(){ if(S&&S.phase==='playing'){ ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='12px "Segoe UI",sans-serif';ctx.textAlign='center';ctx.fillText(Math.floor(S.roundTime)+'s',W/2,20); } }
 
-            let lastT=performance.now();
+            let lastT=performance.now(), acc=0;
             function render(t){
-                const dt=Math.min(0.05,(t-lastT)/1000); lastT=t;
+                const dt=Math.min(0.1,(t-lastT)/1000); lastT=t;
+                // 物理固定步长随渲染帧推进，避免 setInterval 与 rAF 不同步导致的"按加速卡一下"
+                acc+=dt; let n=0;
+                while(acc>=1/60 && n<3){ if(isHost && game.phase!=='menu') physTick(); acc-=1/60; n++; }
+                if(acc>1/15) acc=0;
                 ctx.clearRect(0,0,W,H);
                 if(S&&S.shake>0){ const sx=(Math.random()-0.5)*S.shake, sy=(Math.random()-0.5)*S.shake; ctx.save();ctx.translate(sx,sy); }
-                drawBackground(); drawTrails(); drawItems(); drawPlayer(0); drawPlayer(1); drawParticles(dt); drawCountdown(); drawHUD();
+                drawBackground(); drawTrails(); drawItems(); drawPlayer(0); drawPlayer(1); drawParticles(dt); drawHUD();
                 if(S&&S.shake>0)ctx.restore();
                 requestAnimationFrame(render);
             }
@@ -421,7 +469,7 @@
             function checkBoundary(p){ return p.x<PLAYER_RADIUS||p.x>W-PLAYER_RADIUS||p.y<PLAYER_RADIUS||p.y>H-PLAYER_RADIUS; }
             function checkTrailCollision(player){
                 if(!player.alive)return false; if(player.shieldActive)return false;
-                const x0=player.prevX,y0=player.prevY,x1=player.x,y1=player.y, dr=PLAYER_RADIUS+Math.ceil(TRAIL_WIDTH/2)+2, dist=Math.hypot(x1-x0,y1-y0), steps=Math.max(1,Math.ceil(dist/2));
+                const x0=player.prevX,y0=player.prevY,x1=player.x,y1=player.y, dr=PLAYER_RADIUS+Math.ceil(TRAIL_WIDTH/2), dist=Math.hypot(x1-x0,y1-y0), steps=Math.max(1,Math.ceil(dist/2));
                 for(let i=0;i<=steps;i++){ const t=i/steps,cx=x0+(x1-x0)*t,cy=y0+(y1-y0)*t,minX=Math.max(0,Math.floor(cx-dr)),maxX=Math.min(W-1,Math.ceil(cx+dr)),minY=Math.max(0,Math.floor(cy-dr)),maxY=Math.min(H-1,Math.ceil(cy+dr));
                     for(let py=minY;py<=maxY;py++)for(let px=minX;px<=maxX;px++){ const dx=px-cx,dy=py-cy; if(dx*dx+dy*dy>dr*dr)continue; const idx=py*W+px, owner=game.trailGrid[idx]; if(owner===0)continue; let collide=false; if(owner===player.id){ if(game.time-game.trailTime[idx]>SAFE_TIME)collide=true; } else collide=true; if(collide)return true; } }
                 return false;
@@ -435,7 +483,7 @@
             }
             function spawnItem(){ if(game.items.length>=MAX_ITEMS)return; let a=0; while(a<50){ const x=40+Math.random()*(W-80),y=40+Math.random()*(H-80),idx=Math.round(y)*W+Math.round(x); if(game.trailGrid[idx]===0){ const types=['speed','shield','score'],w=[0.4,0.35,0.25]; let r=Math.random(),type='speed',cum=0; for(let i=0;i<types.length;i++){cum+=w[i];if(r<cum){type=types[i];break;}} const it=new Item(x,y,type); it.spawnTime=game.time; game.items.push(it); return; } a++; } }
             function checkItemCollisions(pl){ if(!pl.alive)return; for(let i=game.items.length-1;i>=0;i--){ const it=game.items[i],d=Math.hypot(pl.x-it.x,pl.y-it.y); if(d<it.radius+PLAYER_RADIUS+4){ applyItem(pl,it); pushSound('item'); spawnFx(it.x,it.y,it.type==='speed'?'#ffd700':it.type==='shield'?'#44ff88':'#cc88ff',20); game.items.splice(i,1); } } }
-            function applyItem(pl,it){ if(it.type==='speed')pl.speedBoostTimer=SPEED_BOOST_DURATION; else if(it.type==='shield'){pl.shieldTimer=SHIELD_DURATION;pl.shieldActive=true;} else if(it.type==='score'){ const idx=pl.id-1; game.scores[idx]++; spawnFx(pl.x,pl.y,'#ffd700',25); if(game.scores[idx]>=WIN_SCORE){ game.winner=pl.id; game.phase='roundEnd'; game.roundPause=1.5; pushSound('win'); } } }
+            function applyItem(pl,it){ if(it.type==='speed')pl.speedBoostTimer=SPEED_BOOST_DURATION; else if(it.type==='shield'){pl.shieldTimer=SHIELD_DURATION;pl.shieldActive=true;} else if(it.type==='score'){ const idx=pl.id-1; game.scores[idx]++; spawnFx(pl.x,pl.y,'#ffd700',25); if(game.scores[idx]>=WIN_SCORE){ game.winner=pl.id; game.roundWinner=pl.id; game.phase='roundEnd'; game.roundPause=1.5; pushSound('win'); } } }
             function physTick(){
                 game.time+=FIXED_DT; game.trailDirty.length=0; game.fx.length=0;
                 if(game.phase==='countdown'){
@@ -582,6 +630,10 @@
             $('roomInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const c=$('roomInput').value.trim(); if(c)joinRoom(c); } });
             $('btnCopy').onclick=()=>{ const txt=roomCode; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>{menuStatus.textContent='房间号已复制';}); } else { const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); menuStatus.textContent='房间号已复制'; } };
 
+            // 帮助
+            $('helpBtn').onclick=()=>{ $('helpModal').style.display='flex'; };
+            $('helpClose').onclick=()=>{ $('helpModal').style.display='none'; };
+
             // 检测触屏 → 显示虚拟按键
             if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
                 $('touchControls').style.display = 'flex';
@@ -590,8 +642,6 @@
             // 启动渲染 + host 物理循环
             setStatus('等待创建/加入房间...');
             requestAnimationFrame(render);
-            // host 物理循环只在创建房间后按需由 createRoom 触发；这里设一个总循环，非 host 时 no-op
-            setInterval(()=>{ if(isHost && game.phase!=='menu') physTick(); }, 1000/60);
         })();
     </script>
 </body>
