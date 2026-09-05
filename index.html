@@ -213,7 +213,7 @@
         (function() {
             const W = 800, H = 560;
             const PLAYER_RADIUS = 6;
-            const TRAIL_WIDTH = 4;
+            const TRAIL_WIDTH = 6;
             const NORMAL_SPEED = 2.6;
             const BOOST_SPEED = 4.8;
             const ITEM_SPEED_BONUS = 1.6;
@@ -282,7 +282,7 @@
             let trailTime = new Float32Array(W*H);
             let particles = [];
             let ghost = [[],[]];
-            let disp = [{x:180,y:H/2},{x:W-180,y:H/2}];
+            let disp = [{x:180,y:H/2-90},{x:W-180,y:H/2+90}];
             let dispInit = false;
             let lastScores = [0,0];
             let myP = 0;
@@ -340,9 +340,9 @@
             }
             function drawTrails(){
                 const img=ctx.createImageData(W,H),data=img.data; const now=S?S.time:0;
-                for(let i=0;i<grid.length;i++){ const o=grid[i]; if(o===0)continue; const fa=Math.max(0.2,1-(now-trailTime[i])*0.15); const di=i*4;
-                    if(o===1){ data[di]=0; data[di+1]=Math.floor(180*fa); data[di+2]=Math.floor(255*fa); data[di+3]=Math.floor(180*fa); }
-                    else { data[di]=Math.floor(255*fa); data[di+1]=Math.floor(40*fa); data[di+2]=Math.floor(80*fa); data[di+3]=Math.floor(180*fa); } }
+                for(let i=0;i<grid.length;i++){ const o=grid[i]; if(o===0)continue; const fa=Math.max(0.32,1-(now-trailTime[i])*0.10); const di=i*4;
+                    if(o===1){ data[di]=0; data[di+1]=Math.floor(200*fa); data[di+2]=Math.floor(255*fa); data[di+3]=Math.floor(220*fa); }
+                    else { data[di]=Math.floor(255*fa); data[di+1]=Math.floor(60*fa); data[di+2]=Math.floor(110*fa); data[di+3]=Math.floor(220*fa); } }
                 ctx.putImageData(img,0,0);
             }
             function drawItems(){ if(!S)return; S.items.forEach(it=>{ const pl=Math.sin(S.time*3+it.x)*3, r=14+pl; const c=it.type==='speed'?'#ffd700':it.type==='shield'?'#44ff88':'#cc88ff'; const g=ctx.createRadialGradient(it.x,it.y,0,it.x,it.y,r*2.5); g.addColorStop(0,c+'aa');g.addColorStop(0.4,c+'44');g.addColorStop(1,c+'00'); ctx.fillStyle=g;ctx.beginPath();ctx.arc(it.x,it.y,r*2.5,0,Math.PI*2);ctx.fill(); ctx.fillStyle=c+'dd';ctx.beginPath();ctx.arc(it.x,it.y,r,0,Math.PI*2);ctx.fill(); ctx.strokeStyle='#ffffffcc';ctx.lineWidth=2;ctx.stroke(); const em=it.type==='speed'?'⚡':it.type==='shield'?'🛡️':'💎'; ctx.font=Math.floor(r*1.2)+'px "Segoe UI Emoji",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(em,it.x,it.y+1); }); }
@@ -394,7 +394,7 @@
             const game = {
                 phase:'menu', scores:[0,0], winner:null, countdown:0, countdownLastInt:COUNTDOWN_TIME, roundPause:0, roundTime:0,
                 itemSpawnTimer:ITEM_SPAWN_INTERVAL_MIN, time:0, shake:0, items:[],
-                players:[new Player(1,180,H/2,1,0,P1_KEYS), new Player(2,W-180,H/2,-1,0,P2_KEYS)],
+                players:[new Player(1,180,H/2-90,1,0,P1_KEYS), new Player(2,W-180,H/2+90,-1,0,P2_KEYS)],
                 trailGrid:new Uint8Array(W*H), trailTime:new Float32Array(W*H), trailDirty:[], fx:[],
             };
 
@@ -404,7 +404,7 @@
             function startRound(){
                 game.trailGrid.fill(0); game.trailTime.fill(0); game.items=[];
                 game.itemSpawnTimer=ITEM_SPAWN_INTERVAL_MIN; game.roundTime=0; game.shake=0; game.time=0;
-                game.players[0].reset(180,H/2,1,0); game.players[1].reset(W-180,H/2,-1,0);
+                game.players[0].reset(180,H/2-90,1,0); game.players[1].reset(W-180,H/2+90,-1,0);
                 resetView();
                 game.phase='countdown'; game.countdown=COUNTDOWN_TIME; game.countdownLastInt=COUNTDOWN_TIME;
                 send({type:'reset'});
@@ -440,7 +440,7 @@
                     if(game.countdown<=0){ game.phase='playing'; game.roundTime=0; pushSound('go'); }
                 } else if(game.phase==='playing'){
                     game.roundTime+=FIXED_DT;
-                    game.players.forEach(p=>{ p.isBoosting=p.keysDown.has(p.keys.boost)&&p.energy>0&&p.alive; p.update(FIXED_DT); });
+                    game.players.forEach(p=>{ p.isBoosting=(p.keysDown.has('shift')||p.keysDown.has('enter'))&&p.energy>0&&p.alive; p.update(FIXED_DT); });
                     game.players.forEach(p=>markTrail(p));
                     let h1=false,h2=false; if(game.players[0].alive)h1=checkPlayerCollision(game.players[0]); if(game.players[1].alive)h2=checkPlayerCollision(game.players[1]);
                     if(h1&&h2){ game.players[0].alive=false;game.players[1].alive=false; game.scores[0]++;game.scores[1]++; spawnFx(game.players[0].x,game.players[0].y,'#00d4ff',40);spawnFx(game.players[1].x,game.players[1].y,'#ff3366',40); pushSound('collision'); game.shake=12; game.winner=null; game.phase='roundEnd'; game.roundPause=ROUND_PAUSE_TIME; }
@@ -505,7 +505,7 @@
                 else if(d.type==='keyup'){ player.keysDown.delete(d.key); }
                 else if(d.type==='restart'){ if(game.phase==='gameOver')startNewGame(); }
             }
-            function applyDir(player,key){ const k=player.keys; let dx=0,dy=0; if(key===k.up)dy=-1; else if(key===k.down)dy=1; else if(key===k.left)dx=-1; else if(key===k.right)dx=1; else return; player.setDirection(dx,dy); }
+            function applyDir(player,key){ let dx=0,dy=0; if(key==='w'||key==='arrowup')dy=-1; else if(key==='s'||key==='arrowdown')dy=1; else if(key==='a'||key==='arrowleft')dx=-1; else if(key==='d'||key==='arrowright')dx=1; else return; player.setDirection(dx,dy); }
 
             function joinRoom(code){
                 isHost=false; myP=1; roomCode=code.toUpperCase().replace(/[^A-Z0-9]/g,'');
