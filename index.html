@@ -562,10 +562,11 @@
                 peer=new Peer('neon-duel-'+roomCode, { config:{ iceServers: ICE_SERVERS } });
                 peer.on('open',()=>{ opened=true; clearTimeout(watchdog); menuStatus.textContent='房间已开，等待朋友加入...'; setStatus('等待对手（房间号 '+roomCode+'）'); });
                 peer.on('error',(err)=>{ const t=err&&err.type;
-                    if(!opened && transientType(t)){
+                    // peer-unavailable / unavailable-id：该房间号(id)被占用或未释放 → 换号重试
+                    if(!opened && (transientType(t) || t==='peer-unavailable' || t==='unavailable-id')){
                         clearTimeout(watchdog);
-                        if(retries<SIGNAL_RETRY_MAX){ menuStatus.textContent='连接信令服务器失败，正在重试('+(retries+1)+'/'+SIGNAL_RETRY_MAX+')...'; setTimeout(()=>createHostPeer(retries+1), 1600); }
-                        else menuStatus.textContent='开房失败：无法连接信令服务器，请检查网络后刷新重试';
+                        if(retries<SIGNAL_RETRY_MAX){ menuStatus.textContent=(t==='peer-unavailable'||t==='unavailable-id'?'房间号被占用，正在换号重试':'连接信令服务器失败，正在重试')+'('+(retries+1)+'/'+SIGNAL_RETRY_MAX+')...'; setTimeout(()=>createHostPeer(retries+1), 1600); }
+                        else menuStatus.textContent='开房失败：无法开房，请稍后重试';
                     } else { menuStatus.textContent='开房出错：'+(t||err); }
                 });
                 peer.on('connection',(c)=>{
