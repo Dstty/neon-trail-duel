@@ -672,30 +672,41 @@
                 dc.onmessage=(e)=>{ let d; try{ d=JSON.parse(e.data); }catch(_){ return; } routeMsg(d); };
                 dc.onerror=()=>{};
             }
+            let generatingInvite=false, pendingOffer=null;
             async function createInvite(){
+                if(generatingInvite) return; // 防止重复/竞态导致 pc 被换掉
+                generatingInvite=true;
+                $('btnInviteCreate').disabled=true;
                 isHost=true; myP=0;
                 $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true;
                 $('invitePanel').style.display='block'; $('hostBox').style.display='none'; $('joinBox').style.display='none';
                 $('inviteStatus').textContent='正在生成邀请码...';
                 try{
+                    closeTransport();
                     pc=new RTCPeerConnection({iceServers: ICE_SERVERS});
                     wireDc(pc.createDataChannel('game',{ordered:true}));
                     const offer=await pc.createOffer();
                     await pc.setLocalDescription(offer);
                     await waitIce(pc);
-                    $('inviteCode').value=b64enc({type:'offer', sdp:pc.localDescription.sdp});
+                    pendingOffer={type:'offer', sdp:pc.localDescription.sdp};
+                    $('inviteCode').value=b64enc(pendingOffer);
                     $('inviteHost').style.display='block'; $('inviteGuest').style.display='none';
                     $('inviteStatus').textContent='邀请码已生成，发给朋友（复制发送）';
                 }catch(e){ $('inviteStatus').textContent='开房失败：'+(e&&e.message||e); }
+                finally{ generatingInvite=false; $('btnInviteCreate').disabled=false; }
             }
+            let joiningInvite=false;
             async function joinInvite(){
+                if(joiningInvite) return; // 防止重复/竞态
+                joiningInvite=true; $('btnInviteJoin').disabled=true;
                 isHost=false; myP=1;
                 const code=$('inviteInput').value.trim(); const desc=b64dec(code);
-                if(!desc || desc.type!=='offer'){ $('inviteStatus').textContent='邀请码无效，请重新粘贴'; return; }
+                if(!desc || desc.type!=='offer'){ $('inviteStatus').textContent='邀请码无效，请重新粘贴'; joiningInvite=false; $('btnInviteJoin').disabled=false; return; }
                 $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true;
                 $('invitePanel').style.display='block'; $('hostBox').style.display='none'; $('joinBox').style.display='none';
                 $('inviteStatus').textContent='正在处理邀请码...';
                 try{
+                    closeTransport();
                     pc=new RTCPeerConnection({iceServers: ICE_SERVERS});
                     pc.ondatachannel=(e)=>wireDc(e.channel);
                     await pc.setRemoteDescription(new RTCSessionDescription(desc));
@@ -706,10 +717,13 @@
                     $('inviteHost').style.display='none'; $('inviteGuest').style.display='block';
                     $('inviteStatus').textContent='已生成回复码，发给房主完成连接';
                 }catch(e){ $('inviteStatus').textContent='加入失败：'+(e&&e.message||e); }
+                finally{ joiningInvite=false; $('btnInviteJoin').disabled=false; }
             }
             async function connectAnswer(){
                 const s=$('replyInput').value.trim(); const ans=b64dec(s);
                 if(!ans || ans.type!=='answer'){ $('inviteStatus').textContent='回复码无效，请重新粘贴'; return; }
+                if(!pc || pc.signalingState==='closed'){ $('inviteStatus').textContent='连接会话已失效，请重新点“生成邀请码”'; return; }
+                if(pc.signalingState!=='have-local-offer'){ $('inviteStatus').textContent='连接状态异常（已在收应答前失去 offer），请重新点“生成邀请码”再试'; return; }
                 try{ await pc.setRemoteDescription(new RTCSessionDescription(ans)); $('inviteStatus').textContent='正在建立连接...'; }
                 catch(e){ $('inviteStatus').textContent='连接失败：'+(e&&e.message||e); }
             }
