@@ -291,6 +291,13 @@
 
             function spawnExplosion(x,y,color,count){ for(let i=0;i<count;i++){ const a=Math.random()*Math.PI*2, sp=1+Math.random()*6, sz=1+Math.random()*3.5, lf=0.5+Math.random()*0.8; particles.push(new P(x,y,color,sp,a,sz,lf)); } }
 
+            // 清空本端渲染用的光迹/粒子/平滑位置（每局开始与断开时调用，防止上一局旧轨迹残留）
+            function resetView(){
+                grid.fill(0); trailTime.fill(0); particles=[]; ghost=[[],[]];
+                dispInit=false; lastScores=[0,0];
+                iconP1.classList.remove('winner-glow'); iconP2.classList.remove('winner-glow-p2');
+            }
+
             function applyState(msg){
                 S = msg;
                 const tr = msg.trail;
@@ -398,6 +405,7 @@
                 game.trailGrid.fill(0); game.trailTime.fill(0); game.items=[];
                 game.itemSpawnTimer=ITEM_SPAWN_INTERVAL_MIN; game.roundTime=0; game.shake=0; game.time=0;
                 game.players[0].reset(180,H/2,1,0); game.players[1].reset(W-180,H/2,-1,0);
+                resetView();
                 game.phase='countdown'; game.countdown=COUNTDOWN_TIME; game.countdownLastInt=COUNTDOWN_TIME;
                 send({type:'reset'});
             }
@@ -456,19 +464,34 @@
             let peer=null, conn=null;
             function send(obj){ if(conn&&conn.open)try{conn.send(obj);}catch(e){} }
 
+            // 信令连接稳定性：瞬时错误自动重试 + open 看门狗，避免"没提示却一直连不上"
+            const SIGNAL_RETRY_MAX=3, OPEN_TIMEOUT_MS=12000, CONN_TIMEOUT_MS=8000;
+            function transientType(t){ return t==='network'||t==='socket-error'||t==='server-error'||t==='socket-closed'||t==='socket-disconnected'; }
+
             function genCode(){ const s='ABCDEFGHJKMNPQRSTUVWXYZ23456789', out=[]; for(let i=0;i<5;i++)out.push(s[Math.floor(Math.random()*s.length)]); return out.join(''); }
             function clearPeer(){ if(peer){ try{peer.destroy();}catch(e){} peer=null; } conn=null; }
 
             function createRoom(){
-                isHost=true; myP=0; roomCode=genCode();
+                isHost=true; myP=0;
                 $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true; $('roomInput').disabled=true;
                 $('hostBox').style.display='block'; $('joinBox').style.display='none';
-                $('roomCode').textContent=roomCode;
-                menuStatus.textContent='正在开启房间...';
+                createHostPeer(0);
+            }
+            function createHostPeer(retries){
                 clearPeer();
+                roomCode=genCode(); $('roomCode').textContent=roomCode;
+                let opened=false;
+                menuStatus.textContent = retries>0 ? '连接信令服务器失败，重试('+retries+'/'+SIGNAL_RETRY_MAX+')...' : '正在开启房间...';
+                const watchdog=setTimeout(()=>{ if(!opened){ if(retries<SIGNAL_RETRY_MAX) createHostPeer(retries+1); else menuStatus.textContent='开房失败：连接信令服务器超时，请检查网络后刷新重试'; } }, OPEN_TIMEOUT_MS);
                 peer=new Peer('neon-duel-'+roomCode, { config:{ iceServers: ICE_SERVERS } });
-                peer.on('open',()=>{ menuStatus.textContent='房间已开，等待朋友加入...'; setStatus('等待对手（房间号 '+roomCode+'）'); });
-                peer.on('error',(err)=>{ menuStatus.textContent='开房出错：'+(err.type||err); });
+                peer.on('open',()=>{ opened=true; clearTimeout(watchdog); menuStatus.textContent='房间已开，等待朋友加入...'; setStatus('等待对手（房间号 '+roomCode+'）'); });
+                peer.on('error',(err)=>{ const t=err&&err.type;
+                    if(!opened && transientType(t)){
+                        clearTimeout(watchdog);
+                        if(retries<SIGNAL_RETRY_MAX){ menuStatus.textContent='连接信令服务器失败，正在重试('+(retries+1)+'/'+SIGNAL_RETRY_MAX+')...'; setTimeout(()=>createHostPeer(retries+1), 1600); }
+                        else menuStatus.textContent='开房失败：无法连接信令服务器，请检查网络后刷新重试';
+                    } else { menuStatus.textContent='开房出错：'+(t||err); }
+                });
                 peer.on('connection',(c)=>{
                     c.on('open',()=>{ conn=c; menu.style.display='none'; menuStatus.textContent='对手已加入！开始...'; setStatus('VS 对战进行中 · 你是玩家 1'); startNewGame(); });
                     c.on('data',(d)=>onGuestMsg(d));
@@ -487,19 +510,32 @@
             function joinRoom(code){
                 isHost=false; myP=1; roomCode=code.toUpperCase().replace(/[^A-Z0-9]/g,'');
                 $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true; $('roomInput').disabled=true;
-                menuStatus.textContent='正在连接房间 '+roomCode+'...';
+                joinPeer(0);
+            }
+            function joinPeer(retries){
                 clearPeer();
+                let opened=false, connOpen=false;
+                menuStatus.textContent = retries>0 ? '连接信令服务器失败，重试('+retries+'/'+SIGNAL_RETRY_MAX+')...' : '正在连接房间 '+roomCode+'...';
+                const watchdog=setTimeout(()=>{ if(!opened){ if(retries<SIGNAL_RETRY_MAX) joinPeer(retries+1); else menuStatus.textContent='加入失败：连接信令服务器超时，请检查网络后刷新重试'; } }, OPEN_TIMEOUT_MS);
                 peer=new Peer({ config:{ iceServers: ICE_SERVERS } });
-                peer.on('open',()=>{
+                peer.on('open',()=>{ opened=true; clearTimeout(watchdog);
+                    const cw=setTimeout(()=>{ if(!connOpen){ if(retries<SIGNAL_RETRY_MAX) joinPeer(retries+1); else menuStatus.textContent='加入失败：连接超时，请确认房间号正确并重试'; } }, CONN_TIMEOUT_MS);
                     conn=peer.connect('neon-duel-'+roomCode, { reliable:true });
-                    conn.on('open',()=>{ menu.style.display='none'; menuStatus.textContent='已连接！等待开始...'; setStatus('已连接 · 你是玩家 2'); });
+                    conn.on('open',()=>{ connOpen=true; clearTimeout(cw); menu.style.display='none'; menuStatus.textContent='已连接！等待开始...'; setStatus('已连接 · 你是玩家 2'); });
                     conn.on('data',(d)=>onHostMsg(d));
                     conn.on('close',()=>{ onDisconnect(); });
-                    conn.on('error',()=>{ menuStatus.textContent='连接错误'; });
+                    conn.on('error',()=>{ clearTimeout(cw); if(!connOpen){ if(retries<SIGNAL_RETRY_MAX){ menuStatus.textContent='找不到该房间，重试('+(retries+1)+'/'+SIGNAL_RETRY_MAX+')...'; setTimeout(()=>joinPeer(retries+1), 1600); } else menuStatus.textContent='找不到该房间，请检查房间号'; } });
                 });
-                peer.on('error',(err)=>{ menuStatus.textContent='加入出错：'+(err.type||err); if(err.type==='peer-unavailable')menuStatus.textContent='找不到该房间，请检查房间号'; });
+                peer.on('error',(err)=>{ const t=err&&err.type;
+                    if(!opened && transientType(t)){
+                        clearTimeout(watchdog);
+                        if(retries<SIGNAL_RETRY_MAX){ menuStatus.textContent='连接信令服务器失败，正在重试('+(retries+1)+'/'+SIGNAL_RETRY_MAX+')...'; setTimeout(()=>joinPeer(retries+1), 1600); }
+                        else menuStatus.textContent='加入失败：无法连接信令服务器，请检查网络后刷新重试';
+                    } else if(t==='peer-unavailable'){ menuStatus.textContent='找不到该房间，请检查房间号'; }
+                    else { menuStatus.textContent='加入出错：'+(t||err); }
+                });
             }
-            function onHostMsg(d){ if(!d)return; if(d.type==='reset'){ grid.fill(0); trailTime.fill(0); particles=[]; ghost=[[],[]]; dispInit=false; lastScores=[0,0]; iconP1.classList.remove('winner-glow'); iconP2.classList.remove('winner-glow-p2'); }
+            function onHostMsg(d){ if(!d)return; if(d.type==='reset'){ resetView(); }
                 else if(d.type==='state'){ applyState(d); } }
             function onDisconnect(){
                 clearPeer();
@@ -507,8 +543,7 @@
                 $('btnCreate').disabled=false; $('btnJoinToggle').disabled=false; $('roomInput').disabled=false;
                 $('hostBox').style.display='none'; $('joinBox').style.display='block';
                 menuStatus.textContent='对手已断开，请重新创建或加入房间';
-                S=null; grid.fill(0); trailTime.fill(0); particles=[]; ghost=[[],[]];
-                iconP1.classList.remove('winner-glow'); iconP2.classList.remove('winner-glow-p2');
+                S=null; resetView();
                 isHost=false;
             }
 
