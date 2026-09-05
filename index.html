@@ -337,6 +337,7 @@
             // 清空本端渲染用的光迹/粒子/平滑位置（每局开始与断开时调用，防止上一局旧轨迹残留）
             function resetView(){
                 grid.fill(0); trailTime.fill(0); particles=[]; ghost=[[],[]]; activeCells.clear();
+                trailImg=null; // 复用的尾迹像素缓冲也清空重建，否则旧一局光迹会残留
                 dispInit=false; lastScores=[0,0];
                 iconP1.classList.remove('winner-glow'); iconP2.classList.remove('winner-glow-p2');
             }
