@@ -236,6 +236,16 @@
             const P2_KEYS = { up:'arrowup', down:'arrowdown', left:'arrowleft', right:'arrowright', boost:'enter' };
             const PCOLORS = ['#00d4ff', '#ff3366'];
 
+            // NAT 穿透：STUN 直连 + TURN 中继兜底（TURN 使用 Meted Open Relay 免费中继）。
+            // 若某个中继不可用或不稳定，可直接改这里换成你自己的 TURN（如 Metered 账号 / 自建 coturn / Cloudflare）。
+            const ICE_SERVERS = [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun.relay.metered.ca:80' },
+                { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+                { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+            ];
+
             const $ = (id) => document.getElementById(id);
             const canvas = $('gameCanvas'), ctx = canvas.getContext('2d');
             const overlay = $('overlay'), overlayText = $('overlayText'), overlaySubText = $('overlaySubtext');
@@ -456,7 +466,7 @@
                 $('roomCode').textContent=roomCode;
                 menuStatus.textContent='正在开启房间...';
                 clearPeer();
-                peer=new Peer('neon-duel-'+roomCode, { config:{ iceServers:[{urls:'stun:stun.l.google.com:19302'}] } });
+                peer=new Peer('neon-duel-'+roomCode, { config:{ iceServers: ICE_SERVERS } });
                 peer.on('open',()=>{ menuStatus.textContent='房间已开，等待朋友加入...'; setStatus('等待对手（房间号 '+roomCode+'）'); });
                 peer.on('error',(err)=>{ menuStatus.textContent='开房出错：'+(err.type||err); });
                 peer.on('connection',(c)=>{
@@ -479,7 +489,7 @@
                 $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true; $('roomInput').disabled=true;
                 menuStatus.textContent='正在连接房间 '+roomCode+'...';
                 clearPeer();
-                peer=new Peer({ config:{ iceServers:[{urls:'stun:stun.l.google.com:19302'}] } });
+                peer=new Peer({ config:{ iceServers: ICE_SERVERS } });
                 peer.on('open',()=>{
                     conn=peer.connect('neon-duel-'+roomCode, { reliable:true });
                     conn.on('open',()=>{ menu.style.display='none'; menuStatus.textContent='已连接！等待开始...'; setStatus('已连接 · 你是玩家 2'); });
