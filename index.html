@@ -143,6 +143,9 @@
         .help-card ul { padding-left: 18px; }
         .help-card b { color: #fff; }
         .help-close { margin-top: 14px; width: 100%; padding: 10px; border: none; border-radius: 12px; background: linear-gradient(90deg,#0090cc,#00d4ff); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }
+        .ready-btn { pointer-events: auto; margin-top: 18px; padding: 12px 26px; border: none; border-radius: 14px; background: linear-gradient(90deg,#0090cc,#00d4ff); color: #fff; font-size: 17px; font-weight: 800; cursor: pointer; box-shadow: 0 0 24px rgba(0,212,255,0.4); }
+        .ready-btn:disabled { opacity: 0.6; cursor: default; }
+        .ready-btn:hover:not(:disabled) { filter: brightness(1.15); }
     </style>
 </head>
 <body>
@@ -180,6 +183,7 @@
             <div class="overlay" id="overlay">
                 <div class="overlay-text" id="overlayText"></div>
                 <div class="overlay-subtext" id="overlaySubtext"></div>
+                <button class="ready-btn" id="readyBtn" style="display:none">再来一局</button>
             </div>
         </div>
         <div class="touch-controls" id="touchControls" style="display:none">
@@ -338,7 +342,7 @@
             function resetView(){
                 grid.fill(0); trailTime.fill(0); particles=[]; ghost=[[],[]]; activeCells.clear();
                 trailImg=null; // 复用的尾迹像素缓冲也清空重建，否则旧一局光迹会残留
-                dispInit=false; lastScores=[0,0];
+                dispInit=false; lastScores=[0,0]; myReady=false; oppReady=false;
                 iconP1.classList.remove('winner-glow'); iconP2.classList.remove('winner-glow-p2');
             }
 
@@ -369,7 +373,7 @@
                     if(m.roundWinner && m.scores[m.roundWinner-1]>=5){ text='🏆 玩家'+m.roundWinner+' 获胜！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]; }
                     else if(m.roundWinner){ text='玩家'+m.roundWinner+' 得分！'; sub=m.scores[0]+' : '+m.scores[1]; }
                     else { text='双方同归于尽！'; sub=m.scores[0]+' : '+m.scores[1]; }
-                } else if(m.phase==='gameOver'){ text='🏆 玩家'+m.winner+' 是最终赢家！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]+' · 按空格重新开始'; }
+                } else if(m.phase==='gameOver'){ text='🏆 玩家'+m.winner+' 是最终赢家！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]+(myReady?(oppReady?' · 已就绪':' · 已就绪，等待对方…'):' · 点『再来一局』或按空格'); }
                 overlay.style.display = show ? 'flex' : 'none';
                 if(show){ overlayText.textContent=text; overlaySubText.textContent=sub; }
             }
@@ -521,8 +525,26 @@
             const SIGNAL_RETRY_MAX=3, OPEN_TIMEOUT_MS=12000, CONN_TIMEOUT_MS=8000;
             function transientType(t){ return t==='network'||t==='socket-error'||t==='server-error'||t==='socket-closed'||t==='socket-disconnected'; }
 
-            function genCode(){ const s='ABCDEFGHJKMNPQRSTUVWXYZ23456789', out=[]; for(let i=0;i<5;i++)out.push(s[Math.floor(Math.random()*s.length)]); return out.join(''); }
-            function clearPeer(){ if(peer){ try{peer.destroy();}catch(e){} peer=null; } conn=null; }
+            // 重开"双方就绪" & 心跳检测（对方掉线后在6秒内探测并停止）
+            let myReady=false, oppReady=false;
+            let beatTimer=null, lastSeen=Date.now();
+            function stopBeat(){ if(beatTimer){ clearInterval(beatTimer); beatTimer=null; } }
+            function startBeat(){ stopBeat(); lastSeen=Date.now(); beatTimer=setInterval(()=>{ send({type:'hb'}); if(Date.now()-lastSeen>6000) onDisconnect(); },2000); }
+            function markReady(){
+                if(!S || S.phase!=='gameOver' || myReady) return;
+                myReady=true; send({type:'ready'});
+                if(isHost && myReady && oppReady){ myReady=oppReady=false; startNewGame(); }
+                updateReadyUI();
+            }
+            function updateReadyUI(){
+                const btn=$('readyBtn'); if(!btn) return;
+                if(!S || S.phase!=='gameOver'){ btn.style.display='none'; return; }
+                btn.style.display='inline-block'; btn.disabled=myReady;
+                btn.textContent = myReady ? (oppReady?'已就绪':'已就绪…') : '再来一局';
+            }
+
+            function genCode(){ return String(Math.floor(1000+Math.random()*9000)); } // 4位数字房间号
+            function clearPeer(){ stopBeat(); if(peer){ try{peer.destroy();}catch(e){} peer=null; } conn=null; }
 
             function createRoom(){
                 isHost=true; myP=0;
@@ -546,8 +568,8 @@
                     } else { menuStatus.textContent='开房出错：'+(t||err); }
                 });
                 peer.on('connection',(c)=>{
-                    c.on('open',()=>{ conn=c; menu.style.display='none'; menuStatus.textContent='对手已加入！开始...'; setStatus('VS 对战进行中 · 你是玩家 1'); startNewGame(); });
-                    c.on('data',(d)=>onGuestMsg(d));
+                    c.on('open',()=>{ conn=c; startBeat(); menu.style.display='none'; menuStatus.textContent='对手已加入！开始...'; setStatus('VS 对战进行中 · 你是玩家 1'); startNewGame(); });
+                    c.on('data',(d)=>{ lastSeen=Date.now(); onGuestMsg(d); });
                     c.on('close',()=>{ onDisconnect(); });
                 });
             }
@@ -556,7 +578,7 @@
                 if(!d)return; const player=game.players[1];
                 if(d.type==='keydown'){ player.keysDown.add(d.key); applyDir(player,d.key); }
                 else if(d.type==='keyup'){ player.keysDown.delete(d.key); }
-                else if(d.type==='restart'){ if(game.phase==='gameOver')startNewGame(); }
+                else if(d.type==='ready'){ oppReady=true; if(isHost && myReady && oppReady){ myReady=oppReady=false; startNewGame(); } updateReadyUI(); }
             }
             function applyDir(player,key){ let dx=0,dy=0; if(key==='w'||key==='arrowup')dy=-1; else if(key==='s'||key==='arrowdown')dy=1; else if(key==='a'||key==='arrowleft')dx=-1; else if(key==='d'||key==='arrowright')dx=1; else return; player.setDirection(dx,dy); }
 
@@ -574,8 +596,8 @@
                 peer.on('open',()=>{ opened=true; clearTimeout(watchdog);
                     const cw=setTimeout(()=>{ if(!connOpen){ if(retries<SIGNAL_RETRY_MAX) joinPeer(retries+1); else menuStatus.textContent='加入失败：连接超时，请确认房间号正确并重试'; } }, CONN_TIMEOUT_MS);
                     conn=peer.connect('neon-duel-'+roomCode, { reliable:true });
-                    conn.on('open',()=>{ connOpen=true; clearTimeout(cw); menu.style.display='none'; menuStatus.textContent='已连接！等待开始...'; setStatus('已连接 · 你是玩家 2'); });
-                    conn.on('data',(d)=>onHostMsg(d));
+                    conn.on('open',()=>{ connOpen=true; clearTimeout(cw); startBeat(); menu.style.display='none'; menuStatus.textContent='已连接！等待开始...'; setStatus('已连接 · 你是玩家 2'); });
+                    conn.on('data',(d)=>{ lastSeen=Date.now(); onHostMsg(d); });
                     conn.on('close',()=>{ onDisconnect(); });
                     conn.on('error',()=>{ clearTimeout(cw); if(!connOpen){ if(retries<SIGNAL_RETRY_MAX){ menuStatus.textContent='找不到该房间，重试('+(retries+1)+'/'+SIGNAL_RETRY_MAX+')...'; setTimeout(()=>joinPeer(retries+1), 1600); } else menuStatus.textContent='找不到该房间，请检查房间号'; } });
                 });
@@ -588,16 +610,18 @@
                     else { menuStatus.textContent='加入出错：'+(t||err); }
                 });
             }
-            function onHostMsg(d){ if(!d)return; if(d.type==='reset'){ resetView(); }
-                else if(d.type==='state'){ applyState(d); } }
+            function onHostMsg(d){ if(!d)return; if(d.type==='reset'){ resetView(); updateReadyUI(); }
+                else if(d.type==='state'){ applyState(d); }
+                else if(d.type==='ready'){ oppReady=true; updateReadyUI(); } }
             function onDisconnect(){
-                clearPeer();
+                stopBeat(); clearPeer();
+                game.phase='menu'; game.scores=[0,0]; game.winner=null; game.roundWinner=null; myReady=false; oppReady=false;
                 menu.style.display='flex';
                 $('btnCreate').disabled=false; $('btnJoinToggle').disabled=false; $('roomInput').disabled=false;
                 $('hostBox').style.display='none'; $('joinBox').style.display='block';
                 menuStatus.textContent='对手已断开，请重新创建或加入房间';
-                S=null; resetView();
-                isHost=false;
+                S=null; resetView(); isHost=false;
+                const b=$('readyBtn'); if(b) b.style.display='none';
             }
 
             function setStatus(t){ statusBar.innerHTML=t; }
@@ -605,7 +629,7 @@
             // ---------- 输入 ----------
             function sendKey(key,down){ if(isHost){ const pl=game.players[0]; if(down){ pl.keysDown.add(key); applyDir(pl,key); } else pl.keysDown.delete(key); } else { send({type:down?'keydown':'keyup',key}); } }
             function onKeyDown(e){ const key=e.key.toLowerCase(); if(['arrowup','arrowdown','arrowleft','arrowright',' ','shift','enter'].includes(key))e.preventDefault();
-                if(key===' '){ if(S&&S.phase==='gameOver'){ if(isHost)startNewGame(); else send({type:'restart'}); } return; }
+                if(key===' '){ if(S&&S.phase==='gameOver'){ markReady(); } return; }
                 sendKey(key,true); }
             function onKeyUp(e){ sendKey(e.key.toLowerCase(),false); }
             window.addEventListener('keydown',onKeyDown); window.addEventListener('keyup',onKeyUp);
@@ -634,6 +658,9 @@
             // 帮助
             $('helpBtn').onclick=()=>{ $('helpModal').style.display='flex'; };
             $('helpClose').onclick=()=>{ $('helpModal').style.display='none'; };
+
+            // 再来一局（需双方就绪）
+            $('readyBtn').onclick=()=>{ markReady(); };
 
             // 检测触屏 → 显示虚拟按键
             if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
