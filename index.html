@@ -280,6 +280,7 @@
             let S = null;
             let grid = new Uint8Array(W*H);
             let trailTime = new Float32Array(W*H);
+            let activeCells = new Set();
             let particles = [];
             let ghost = [[],[]];
             let disp = [{x:180,y:H/2-90},{x:W-180,y:H/2+90}];
@@ -293,7 +294,7 @@
 
             // 清空本端渲染用的光迹/粒子/平滑位置（每局开始与断开时调用，防止上一局旧轨迹残留）
             function resetView(){
-                grid.fill(0); trailTime.fill(0); particles=[]; ghost=[[],[]];
+                grid.fill(0); trailTime.fill(0); particles=[]; ghost=[[],[]]; activeCells.clear();
                 dispInit=false; lastScores=[0,0];
                 iconP1.classList.remove('winner-glow'); iconP2.classList.remove('winner-glow-p2');
             }
@@ -301,7 +302,7 @@
             function applyState(msg){
                 S = msg;
                 const tr = msg.trail;
-                for(let i=0;i<tr.length;i+=4){ grid[tr[i+1]*W+tr[i]] = tr[i+2]; trailTime[tr[i+1]*W+tr[i]] = tr[i+3]; }
+                for(let i=0;i<tr.length;i+=4){ const idx=tr[i+1]*W+tr[i]; grid[idx] = tr[i+2]; trailTime[idx] = tr[i+3]; activeCells.add(idx); }
                 (msg.fx||[]).forEach(e=>{ if(e.type==='explosion')spawnExplosion(e.x,e.y,e.color,e.count); else if(e.type==='sound')playSound(e.name); });
                 if(!dispInit){ disp[0].x=msg.p0.x;disp[0].y=msg.p0.y;disp[1].x=msg.p1.x;disp[1].y=msg.p1.y;dispInit=true; }
                 updateUI();
@@ -322,8 +323,8 @@
                 } else if(m.phase==='countdown'){ text='准备...'; sub='';
                 } else if(m.phase==='playing'){ show=false;
                 } else if(m.phase==='roundEnd'){
-                    if(m.winner && m.scores[m.winner-1]>=5){ text='🏆 玩家'+m.winner+' 获胜！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]; }
-                    else if(m.winner){ text='玩家'+m.winner+' 得分！'; sub=m.scores[0]+' : '+m.scores[1]; }
+                    if(m.roundWinner && m.scores[m.roundWinner-1]>=5){ text='🏆 玩家'+m.roundWinner+' 获胜！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]; }
+                    else if(m.roundWinner){ text='玩家'+m.roundWinner+' 得分！'; sub=m.scores[0]+' : '+m.scores[1]; }
                     else { text='双方同归于尽！'; sub=m.scores[0]+' : '+m.scores[1]; }
                 } else if(m.phase==='gameOver'){ text='🏆 玩家'+m.winner+' 是最终赢家！'; sub='最终比分 '+m.scores[0]+' : '+m.scores[1]+' · 按空格重新开始'; }
                 overlay.style.display = show ? 'flex' : 'none';
@@ -339,8 +340,9 @@
                 ctx.strokeStyle='rgba(100,100,200,0.3)'; ctx.lineWidth=2; ctx.strokeRect(1,1,W-2,H-2);
             }
             function drawTrails(){
+                if(activeCells.size===0) return;
                 const img=ctx.createImageData(W,H),data=img.data; const now=S?S.time:0;
-                for(let i=0;i<grid.length;i++){ const o=grid[i]; if(o===0)continue; const fa=Math.max(0.32,1-(now-trailTime[i])*0.10); const di=i*4;
+                for(const i of activeCells){ const o=grid[i]; if(o===0)continue; const fa=Math.max(0.5,1-(now-trailTime[i])*0.10); const di=i*4;
                     if(o===1){ data[di]=0; data[di+1]=Math.floor(200*fa); data[di+2]=Math.floor(255*fa); data[di+3]=Math.floor(220*fa); }
                     else { data[di]=Math.floor(255*fa); data[di+1]=Math.floor(60*fa); data[di+2]=Math.floor(110*fa); data[di+3]=Math.floor(220*fa); } }
                 ctx.putImageData(img,0,0);
@@ -385,14 +387,15 @@
                     if(this.speedBoostTimer>0){this.speedBoostTimer-=dt;if(this.speedBoostTimer<=0)this.speedBoostTimer=0;}
                     if(this.shieldTimer>0){this.shieldTimer-=dt;this.shieldActive=this.shieldTimer>0;if(this.shieldTimer<=0){this.shieldTimer=0;this.shieldActive=false;}}
                     if(this.isBoosting&&this.energy>0)this.energy=Math.max(0,this.energy-ENERGY_DRAIN_RATE*dt); else this.energy=Math.min(ENERGY_MAX,this.energy+ENERGY_REGEN_RATE*dt);
-                    this.x+=this.dirX*this.speed; this.y+=this.dirY*this.speed; }
+                    this.x+=this.dirX*this.speed; this.y+=this.dirY*this.speed;
+                    if(this.shieldActive){ this.x=Math.max(PLAYER_RADIUS,Math.min(W-PLAYER_RADIUS,this.x)); this.y=Math.max(PLAYER_RADIUS,Math.min(H-PLAYER_RADIUS,this.y)); } }
                 setDirection(dx,dy){ if(dx===-this.dirX&&dy===-this.dirY)return; if(dx===this.dirX&&dy===this.dirY)return; if(dx!==0&&dy!==0)return; this.dirX=dx;this.dirY=dy; }
                 reset(x,y,dx,dy){ this.x=x;this.y=y;this.prevX=x;this.prevY=y;this.dirX=dx;this.dirY=dy;this.energy=ENERGY_MAX;this.isBoosting=false;this.speedBoostTimer=0;this.shieldTimer=0;this.shieldActive=false;this.alive=true;this.keysDown.clear(); }
             }
             class Item { constructor(x,y,type){ this.x=x;this.y=y;this.type=type;this.radius=14;this.duration=ITEM_DURATION; } isExpired(){ return game.time-this.spawnTime>this.duration; } }
 
             const game = {
-                phase:'menu', scores:[0,0], winner:null, countdown:0, countdownLastInt:COUNTDOWN_TIME, roundPause:0, roundTime:0,
+                phase:'menu', scores:[0,0], winner:null, roundWinner:null, countdown:0, countdownLastInt:COUNTDOWN_TIME, roundPause:0, roundTime:0,
                 itemSpawnTimer:ITEM_SPAWN_INTERVAL_MIN, time:0, shake:0, items:[],
                 players:[new Player(1,180,H/2-90,1,0,P1_KEYS), new Player(2,W-180,H/2+90,-1,0,P2_KEYS)],
                 trailGrid:new Uint8Array(W*H), trailTime:new Float32Array(W*H), trailDirty:[], fx:[],
@@ -400,10 +403,10 @@
 
             function spawnFx(x,y,color,count){ game.fx.push({type:'explosion',x,y,color,count}); }
             function pushSound(n){ game.fx.push({type:'sound',name:n}); }
-            function startNewGame(){ game.scores=[0,0]; game.winner=null; startRound(); }
+            function startNewGame(){ game.scores=[0,0]; game.winner=null; game.roundWinner=null; startRound(); }
             function startRound(){
                 game.trailGrid.fill(0); game.trailTime.fill(0); game.items=[];
-                game.itemSpawnTimer=ITEM_SPAWN_INTERVAL_MIN; game.roundTime=0; game.shake=0; game.time=0;
+                game.itemSpawnTimer=ITEM_SPAWN_INTERVAL_MIN; game.roundTime=0; game.shake=0; game.time=0; game.roundWinner=null;
                 game.players[0].reset(180,H/2-90,1,0); game.players[1].reset(W-180,H/2+90,-1,0);
                 resetView();
                 game.phase='countdown'; game.countdown=COUNTDOWN_TIME; game.countdownLastInt=COUNTDOWN_TIME;
@@ -411,6 +414,7 @@
             }
             function endRound(winnerId){ const wi=winnerId-1, loser=game.players[1-wi]; game.scores[wi]++;
                 spawnFx(loser.x,loser.y,wi===0?'#00d4ff':'#ff3366',80); spawnFx(loser.x,loser.y,'#ffffff',40); pushSound('collision'); game.shake=12;
+                game.roundWinner=winnerId;
                 if(game.scores[wi]>=WIN_SCORE){ game.winner=winnerId; game.phase='roundEnd'; game.roundPause=1.5; } else { game.phase='roundEnd'; game.roundPause=ROUND_PAUSE_TIME; }
                 game.players.forEach(p=>p.alive=false);
             }
@@ -422,7 +426,7 @@
                     for(let py=minY;py<=maxY;py++)for(let px=minX;px<=maxX;px++){ const dx=px-cx,dy=py-cy; if(dx*dx+dy*dy>dr*dr)continue; const idx=py*W+px, owner=game.trailGrid[idx]; if(owner===0)continue; let collide=false; if(owner===player.id){ if(game.time-game.trailTime[idx]>SAFE_TIME)collide=true; } else collide=true; if(collide)return true; } }
                 return false;
             }
-            function checkPlayerCollision(p){ if(!p.alive)return false; if(checkBoundary(p))return true; return checkTrailCollision(p); }
+            function checkPlayerCollision(p){ if(!p.alive)return false; if(p.shieldActive)return false; if(checkBoundary(p))return true; return checkTrailCollision(p); }
             function markTrail(pl){
                 if(!pl.alive)return;
                 const x0=Math.round(pl.prevX),y0=Math.round(pl.prevY),x1=Math.round(pl.x),y1=Math.round(pl.y),dx=Math.abs(x1-x0),dy=Math.abs(y1-y0),sx=x0<x1?1:-1,sy=y0<y1?1:-1;
@@ -443,7 +447,7 @@
                     game.players.forEach(p=>{ p.isBoosting=(p.keysDown.has('shift')||p.keysDown.has('enter'))&&p.energy>0&&p.alive; p.update(FIXED_DT); });
                     game.players.forEach(p=>markTrail(p));
                     let h1=false,h2=false; if(game.players[0].alive)h1=checkPlayerCollision(game.players[0]); if(game.players[1].alive)h2=checkPlayerCollision(game.players[1]);
-                    if(h1&&h2){ game.players[0].alive=false;game.players[1].alive=false; game.scores[0]++;game.scores[1]++; spawnFx(game.players[0].x,game.players[0].y,'#00d4ff',40);spawnFx(game.players[1].x,game.players[1].y,'#ff3366',40); pushSound('collision'); game.shake=12; game.winner=null; game.phase='roundEnd'; game.roundPause=ROUND_PAUSE_TIME; }
+                    if(h1&&h2){ game.players[0].alive=false;game.players[1].alive=false; game.scores[0]++;game.scores[1]++; spawnFx(game.players[0].x,game.players[0].y,'#00d4ff',40);spawnFx(game.players[1].x,game.players[1].y,'#ff3366',40); pushSound('collision'); game.shake=12; game.winner=null; game.roundWinner=null; game.phase='roundEnd'; game.roundPause=ROUND_PAUSE_TIME; }
                     else if(h1){ game.players[0].alive=false; endRound(2); } else if(h2){ game.players[1].alive=false; endRound(1); }
                     if(game.phase==='playing')game.players.forEach(p=>checkItemCollisions(p));
                     game.itemSpawnTimer-=FIXED_DT; if(game.itemSpawnTimer<=0){ spawnItem(); game.itemSpawnTimer=ITEM_SPAWN_INTERVAL_MIN+Math.random()*(ITEM_SPAWN_INTERVAL_MAX-ITEM_SPAWN_INTERVAL_MIN); }
@@ -453,7 +457,7 @@
             }
             function simState(){
                 const pl=game.players;
-                return { type:'state', phase:game.phase, time:game.time, scores:game.scores.slice(), winner:game.winner, countdown:Math.max(0,game.countdown), roundTime:game.roundTime, shake:game.shake,
+                return { type:'state', phase:game.phase, time:game.time, scores:game.scores.slice(), winner:game.winner, roundWinner:game.roundWinner, countdown:Math.max(0,game.countdown), roundTime:game.roundTime, shake:game.shake,
                     p0:{x:pl[0].x,y:pl[0].y,energy:pl[0].energy,boost:pl[0].isBoosting,shield:pl[0].shieldActive,speed:pl[0].speedBoostTimer>0,alive:pl[0].alive},
                     p1:{x:pl[1].x,y:pl[1].y,energy:pl[1].energy,boost:pl[1].isBoosting,shield:pl[1].shieldActive,speed:pl[1].speedBoostTimer>0,alive:pl[1].alive},
                     items:game.items.map(i=>({x:i.x,y:i.y,type:i.type})), trail:game.trailDirty.slice(), fx:game.fx.slice() };
