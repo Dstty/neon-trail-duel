@@ -207,52 +207,22 @@
         <div class="menu-card">
             <h1>⚡ 霓虹光迹对决 ⚡</h1>
             <p>双人 P2P 对战 · 先得 5 分获胜</p>
-            <div class="mode-row">
-                <button class="btn" id="modeRoom">① 房间号</button>
-                <button class="btn secondary" id="modeInvite">② 邀请码</button>
-            </div>
 
-            <div id="roomMode">
-                <button class="btn" id="btnCreate">🎮 创建房间</button>
-                <button class="btn secondary" id="btnJoinToggle">🤝 加入房间</button>
-                <div id="joinBox" style="display:none; margin-top:12px">
-                    <input class="room-input" id="roomInput" placeholder="输入4位房间号" maxlength="4">
-                    <div style="margin-top:10px"><button class="btn secondary" id="btnJoin">加入</button></div>
-                </div>
-                <div id="hostBox" style="display:none; margin-top:12px">
-                    <div class="menu-status">你的房间号</div>
-                    <div class="room-display" id="roomCode">-----</div>
-                    <button class="copy-btn" id="btnCopy">复制房间号</button>
-                    <div class="menu-status">把它发给朋友，朋友点"加入房间"输入即可</div>
-                </div>
+            <button class="btn" id="btnCreate">🎮 创建房间</button>
+            <button class="btn secondary" id="btnJoinToggle">🤝 加入房间</button>
+            <div id="joinBox" style="display:none; margin-top:12px">
+                <input class="room-input" id="roomInput" placeholder="输入4位房间号" maxlength="4">
+                <div style="margin-top:10px"><button class="btn secondary" id="btnJoin">加入</button></div>
             </div>
-
-            <div id="inviteMode" style="display:none">
-                <button class="btn" id="btnInviteCreate">🎮 生成邀请码(建房)</button>
-                <button class="btn secondary" id="btnInviteJoinToggle">🤝 我拿到邀请码(加入)</button>
-                <div id="invitePanel" style="display:none; margin-top:12px">
-                    <div id="inviteHost" style="display:none">
-                        <div class="menu-status">你的邀请码（发给朋友）</div>
-                        <textarea class="room-input" id="inviteCode" readonly rows="4" placeholder="生成后出现在这里"></textarea>
-                        <button class="copy-btn" id="btnCopyInvite">复制邀请码</button>
-                        <div class="menu-status" style="margin-top:8px">朋友粘贴后用"生成回复码"，再把回复码粘贴到下面</div>
-                        <textarea class="room-input" id="replyInput" placeholder="粘贴朋友的回复码" rows="4"></textarea>
-                        <button class="btn secondary" id="btnConnect" style="margin-top:10px">连接</button>
-                    </div>
-                    <div id="inviteGuest" style="display:none">
-                        <div class="menu-status">粘贴房主发来的邀请码</div>
-                        <textarea class="room-input" id="inviteInput" placeholder="粘贴邀请码" rows="4"></textarea>
-                        <button class="btn secondary" id="btnInviteJoin" style="margin-top:10px">生成回复码</button>
-                        <div class="menu-status" style="margin-top:8px">把下面的回复码发给房主</div>
-                        <textarea class="room-input" id="replyCode" readonly rows="4" placeholder="生成后出现在这里"></textarea>
-                        <button class="copy-btn" id="btnCopyReply">复制回复码</button>
-                    </div>
-                    <div class="menu-status" id="inviteStatus"></div>
-                </div>
+            <div id="hostBox" style="display:none; margin-top:12px">
+                <div class="menu-status">你的房间号</div>
+                <div class="room-display" id="roomCode">-----</div>
+                <button class="copy-btn" id="btnCopy">复制房间号</button>
+                <div class="menu-status">把它发给朋友，朋友点"加入房间"输入即可</div>
             </div>
 
             <div class="menu-status" id="menuStatus">当前未连接</div>
-            <div class="menu-note" id="menuNote">① 房间号：一人创建、对方输 4 位号自动连；② 邀请码：复制一串码互传，不去云端、最可靠。</div>
+            <div class="menu-note" id="menuNote">一人创建房间、对方输 4 位房间号即可自动连上。</div>
         </div>
     </div>
 
@@ -654,87 +624,12 @@
                 });
             }
 
-            // ---------- 模式二：邀请码（纯 WebRTC 手动信令，无第三方云） ----------
-            function b64enc(obj){ return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))); }
-            function b64dec(s){ try{ return JSON.parse(decodeURIComponent(escape(atob((s||'').trim())))); }catch(e){ return null; } }
-            function waitIce(p){ return new Promise(res=>{ if(p.iceGatheringState==='complete')return res(); const f=()=>{ if(p.iceGatheringState==='complete'){ p.removeEventListener('icegatheringstatechange',f); res(); } }; p.addEventListener('icegatheringstatechange',f); }); }
-            function wireDc(ch){
-                dc=ch;
-                let connectTimer=setTimeout(()=>{
-                    if(dc && dc.readyState!=='open'){
-                        menuStatus.textContent='连接超时：网络NAT可能受限，暂时连不上。请重新生成邀请码再试，或改用①房间号';
-                        closeTransport();
-                    }
-                }, 25000);
-                dc.onopen=()=>{ clearTimeout(connectTimer); startBeat(); menu.style.display='none';
-                    if(isHost){ menuStatus.textContent='对手已加入！开始...'; setStatus('VS 对战进行中 · 你是玩家 1'); startNewGame(); }
-                    else { menuStatus.textContent='已连接！等待房主开始...'; setStatus('已连接 · 你是玩家 2'); } };
-                dc.onclose=()=>{ clearTimeout(connectTimer); onDisconnect(); };
-                dc.onmessage=(e)=>{ let d; try{ d=JSON.parse(e.data); }catch(_){ return; } routeMsg(d); };
-                dc.onerror=()=>{};
-            }
-            let generatingInvite=false, pendingOffer=null;
-            async function createInvite(){
-                if(generatingInvite) return; // 防止重复/竞态导致 pc 被换掉
-                generatingInvite=true;
-                $('btnInviteCreate').disabled=true;
-                isHost=true; myP=0;
-                $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true;
-                $('invitePanel').style.display='block'; $('hostBox').style.display='none'; $('joinBox').style.display='none';
-                $('inviteStatus').textContent='正在生成邀请码...';
-                try{
-                    closeTransport();
-                    pc=new RTCPeerConnection({iceServers: ICE_SERVERS});
-                    wireDc(pc.createDataChannel('game',{ordered:true}));
-                    const offer=await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-                    await waitIce(pc);
-                    pendingOffer={type:'offer', sdp:pc.localDescription.sdp};
-                    $('inviteCode').value=b64enc(pendingOffer);
-                    $('inviteHost').style.display='block'; $('inviteGuest').style.display='none';
-                    $('inviteStatus').textContent='邀请码已生成，发给朋友（复制发送）';
-                }catch(e){ $('inviteStatus').textContent='开房失败：'+(e&&e.message||e); }
-                finally{ generatingInvite=false; $('btnInviteCreate').disabled=false; }
-            }
-            let joiningInvite=false;
-            async function joinInvite(){
-                if(joiningInvite) return; // 防止重复/竞态
-                joiningInvite=true; $('btnInviteJoin').disabled=true;
-                isHost=false; myP=1;
-                const code=$('inviteInput').value.trim(); const desc=b64dec(code);
-                if(!desc || desc.type!=='offer'){ $('inviteStatus').textContent='邀请码无效，请重新粘贴'; joiningInvite=false; $('btnInviteJoin').disabled=false; return; }
-                $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true;
-                $('invitePanel').style.display='block'; $('hostBox').style.display='none'; $('joinBox').style.display='none';
-                $('inviteStatus').textContent='正在处理邀请码...';
-                try{
-                    closeTransport();
-                    pc=new RTCPeerConnection({iceServers: ICE_SERVERS});
-                    pc.ondatachannel=(e)=>wireDc(e.channel);
-                    await pc.setRemoteDescription(new RTCSessionDescription(desc));
-                    const answer=await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    await waitIce(pc);
-                    $('replyCode').value=b64enc({type:'answer', sdp:pc.localDescription.sdp});
-                    $('inviteHost').style.display='none'; $('inviteGuest').style.display='block';
-                    $('inviteStatus').textContent='已生成回复码，发给房主完成连接';
-                }catch(e){ $('inviteStatus').textContent='加入失败：'+(e&&e.message||e); }
-                finally{ joiningInvite=false; $('btnInviteJoin').disabled=false; }
-            }
-            async function connectAnswer(){
-                const s=$('replyInput').value.trim(); const ans=b64dec(s);
-                if(!ans || ans.type!=='answer'){ $('inviteStatus').textContent='回复码无效，请重新粘贴'; return; }
-                if(!pc || pc.signalingState==='closed'){ $('inviteStatus').textContent='连接会话已失效，请重新点“生成邀请码”'; return; }
-                if(pc.signalingState!=='have-local-offer'){ $('inviteStatus').textContent='连接状态异常（已在收应答前失去 offer），请重新点“生成邀请码”再试'; return; }
-                try{ await pc.setRemoteDescription(new RTCSessionDescription(ans)); $('inviteStatus').textContent='正在建立连接...'; }
-                catch(e){ $('inviteStatus').textContent='连接失败：'+(e&&e.message||e); }
-            }
-
             function onDisconnect(){
                 closeTransport();
                 game.phase='menu'; game.scores=[0,0]; game.winner=null; game.roundWinner=null; myReady=false; oppReady=false;
                 menu.style.display='flex';
                 $('btnCreate').disabled=false; $('btnJoinToggle').disabled=false; $('roomInput').disabled=false;
-                $('hostBox').style.display='none'; $('joinBox').style.display='block'; $('invitePanel').style.display='none';
+                $('hostBox').style.display='none'; $('joinBox').style.display='block';
                 menuStatus.textContent='连接已断开，请重新创建或加入房间';
                 S=null; resetView(); isHost=false;
                 const b=$('readyBtn'); if(b) b.style.display='none';
@@ -773,15 +668,6 @@
 
             // ---------- 模式切换：房间号 / 邀请码 ----------
             function copyText(txt,msg){ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>{menuStatus.textContent=msg||'已复制';}); } else { const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); menuStatus.textContent=msg||'已复制'; } }
-            $('modeRoom').onclick=()=>{ $('roomMode').style.display='block'; $('inviteMode').style.display='none'; };
-            $('modeInvite').onclick=()=>{ $('roomMode').style.display='none'; $('inviteMode').style.display='block'; };
-            $('btnInviteCreate').onclick=()=>createInvite();
-            $('btnInviteJoinToggle').onclick=()=>{ $('invitePanel').style.display='block'; $('inviteGuest').style.display='block'; $('inviteHost').style.display='none'; };
-            $('btnInviteJoin').onclick=()=>joinInvite();
-            $('btnConnect').onclick=()=>connectAnswer();
-            $('btnCopyInvite').onclick=()=>copyText($('inviteCode').value,'邀请码已复制');
-            $('btnCopyReply').onclick=()=>copyText($('replyCode').value,'回复码已复制');
-
             // 帮助
             $('helpBtn').onclick=()=>{ $('helpModal').style.display='flex'; };
             $('helpClose').onclick=()=>{ $('helpModal').style.display='none'; };
