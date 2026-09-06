@@ -319,13 +319,12 @@
             // NAT 穿透：STUN 直连 + TURN 中继兜底（TURN 使用 Meted Open Relay 免费中继）。
             // 若某个中继不可用或不稳定，可直接改这里换成你自己的 TURN（如 Metered 账号 / 自建 coturn / Cloudflare）。
             const ICE_SERVERS = [
+                { urls: 'turn:82.157.192.206:3478', username: 'neon', credential: 'Ne0nTurn2026' },
+                { urls: 'turn:82.157.192.206:3478?transport=tcp', username: 'neon', credential: 'Ne0nTurn2026' },
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun.cloudflare.com:3478' },
                 { urls: 'stun:stun.relay.metered.ca:80' },
                 { urls: 'stun:global.stun.twilio.com:3478' },
-                { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-                { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-                { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
             ];
 
             const $ = (id) => document.getElementById(id);
@@ -554,19 +553,15 @@
             }
             function broadcastSim(){ const st=simState(); send(st); applyState(st); game.trailDirty.length=0; game.fx.length=0; }
 
-            // ============ 双模式联网：房间号(PeerJS) + 邀请码(WebRTC) ============
-            let peer=null, conn=null;   // 房间号模式：PeerJS
-            let pc=null, dc=null;       // 邀请码模式：WebRTC
+            // ============ 联网：房间号（PeerJS） ============
+            let peer=null, conn=null;   // PeerJS 信令 + 数据通道
             let myReady=false, oppReady=false;
             let beatTimer=null, lastSeen=Date.now();
 
-            function send(obj){
-                if(conn && conn.open){ try{ conn.send(obj); }catch(e){} return; }
-                if(dc && dc.readyState==='open'){ try{ dc.send(JSON.stringify(obj)); }catch(e){} }
-            }
+            function send(obj){ if(conn && conn.open){ try{ conn.send(obj); }catch(e){} } }
             function stopBeat(){ if(beatTimer){ clearInterval(beatTimer); beatTimer=null; } }
             function startBeat(){ stopBeat(); lastSeen=Date.now(); beatTimer=setInterval(()=>{ send({type:'hb'}); if(Date.now()-lastSeen>6000) onDisconnect(); },2000); }
-            function closeTransport(){ stopBeat(); if(peer){ try{peer.destroy();}catch(e){} peer=null; } conn=null; if(dc){ try{dc.close();}catch(e){} dc=null; } if(pc){ try{pc.close();}catch(e){} pc=null; } }
+            function closeTransport(){ stopBeat(); if(peer){ try{peer.destroy();}catch(e){} peer=null; } conn=null; }
 
             function markReady(){
                 if(!S || S.phase!=='gameOver' || myReady) return;
@@ -581,7 +576,7 @@
                 btn.textContent = myReady ? (oppReady?'✓ 已就绪':'已就绪…') : (oppReady?'再来一局（对方已就绪）':'再来一局');
             }
 
-            // 统一对端消息分发（两种模式通用）
+            // 对端消息分发（房间号模式）
             function routeMsg(d){
                 if(!d)return; lastSeen=Date.now();
                 if(isHost){
@@ -602,10 +597,10 @@
             function genCode(){ return String(Math.floor(1000+Math.random()*9000)); } // 4位数字房间号
 
             function createRoom(){
-                if(typeof Peer==='undefined'){ menuStatus.textContent='房间号模式暂不可用（信令库没加载），请改用②邀请码模式'; return; }
+                if(typeof Peer==='undefined'){ menuStatus.textContent='房间号模式暂不可用（信令库没加载成功），请刷新页面重试'; return; }
                 isHost=true; myP=0;
                 $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true; $('roomInput').disabled=true;
-                $('hostBox').style.display='block'; $('joinBox').style.display='none'; $('invitePanel').style.display='none';
+                $('hostBox').style.display='block'; $('joinBox').style.display='none';
                 createHostPeer(0);
             }
             function createHostPeer(retries){
@@ -630,7 +625,7 @@
                 });
             }
             function joinRoom(code){
-                if(typeof Peer==='undefined'){ menuStatus.textContent='房间号模式暂不可用（信令库没加载），请改用②邀请码模式'; return; }
+                if(typeof Peer==='undefined'){ menuStatus.textContent='房间号模式暂不可用（信令库没加载成功），请刷新页面重试'; return; }
                 isHost=false; myP=1; roomCode=code.toUpperCase().replace(/[^A-Z0-9]/g,'');
                 $('btnCreate').disabled=true; $('btnJoinToggle').disabled=true; $('roomInput').disabled=true;
                 joinPeer(0);
@@ -665,10 +660,16 @@
             function waitIce(p){ return new Promise(res=>{ if(p.iceGatheringState==='complete')return res(); const f=()=>{ if(p.iceGatheringState==='complete'){ p.removeEventListener('icegatheringstatechange',f); res(); } }; p.addEventListener('icegatheringstatechange',f); }); }
             function wireDc(ch){
                 dc=ch;
-                dc.onopen=()=>{ startBeat(); menu.style.display='none';
+                let connectTimer=setTimeout(()=>{
+                    if(dc && dc.readyState!=='open'){
+                        menuStatus.textContent='连接超时：网络NAT可能受限，暂时连不上。请重新生成邀请码再试，或改用①房间号';
+                        closeTransport();
+                    }
+                }, 25000);
+                dc.onopen=()=>{ clearTimeout(connectTimer); startBeat(); menu.style.display='none';
                     if(isHost){ menuStatus.textContent='对手已加入！开始...'; setStatus('VS 对战进行中 · 你是玩家 1'); startNewGame(); }
                     else { menuStatus.textContent='已连接！等待房主开始...'; setStatus('已连接 · 你是玩家 2'); } };
-                dc.onclose=()=>{ onDisconnect(); };
+                dc.onclose=()=>{ clearTimeout(connectTimer); onDisconnect(); };
                 dc.onmessage=(e)=>{ let d; try{ d=JSON.parse(e.data); }catch(_){ return; } routeMsg(d); };
                 dc.onerror=()=>{};
             }
